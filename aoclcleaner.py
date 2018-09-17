@@ -6,7 +6,6 @@ import getopt, os, shutil, sys
 
 
 cleanerName = os.path.basename(os.path.splitext(__file__)[0])
-versions = ["16.0", "16.1"]
 
 
 def printError(error, usageFunc, mustExit=False, addInfo=None, addInfos=[]):
@@ -40,6 +39,7 @@ class Errors(Enum):
 
 
 class Warnings(Enum):
+	IGNORING_ARGUMENT = "Ignoring argument"
 	USING_DEFAULT_VALUE = "Using default value"
 
 
@@ -49,14 +49,11 @@ def printUsage(printToError=False):
 		'\n'
 		'Usage: {0} ARGS... PATH\n'
 		'Where ARGS can be:\n'
-		'	-d, --dry-run		  : don\'t modify anything, just print what would be kept and deleted\n'
-		'	-v, --version=VERSION  : specify Quartus version of the project\n'
+		'	-d, --dry-run		   : don\'t modify anything, just print what would be kept and deleted\n'
 		'	-p, --project-name=NAME: specify the project name (default is top)\n'
-		'	-h, --help			 : show this message\n'
-		'Where PATH is the path to the Quartus project folder\n'
-		'\n'
-		'Supported Quartus versions:\n'
-		'	{1}'.format(cleanerName, ", ".join(map(str, versions)))
+		'	-r, --recursive        : recursively search PATH for Quartus projects and clean them all\n'
+		'	-h, --help			   : show this message\n'
+		'Where PATH is the path to the Quartus project folder\n'.format(cleanerName)
 	)
 
 	if printToError:
@@ -84,86 +81,99 @@ def getTotalFolderSize(path="."):
 	return "{:.2f} {} ({:.2f} {})".format(totalSize, unitList[unit], totalBinSize, unitBinList[unit])
 
 
+def cleanProject(path=".", dryRun=False):
+	maintainFolders = [
+		"reports"
+	]
+	maintainExtensions = [
+		".log",
+		".txt",
+		".rpt",
+		".qsf",
+		".orig",
+		".smsg",
+		".summary",
+		".qpf",
+		".qdf",
+		".v",
+		".qsys"
+	]
+
+	for p in os.listdir(path):
+		fullPath = os.path.join(path, p)
+		if os.path.isdir(fullPath):
+			if p not in maintainFolders:
+				print(">   Removing {} folder...".format(p))
+				if not dryRun:
+					shutil.rmtree(fullPath)
+		else:
+			if os.path.splitext(p)[1] not in maintainExtensions:
+				print(">   Removing {} file...".format(p))
+				if not dryRun:
+					os.remove(fullPath)
+
+
 if "__main__" == __name__:
 	opts = []
 	args = []
 	dryRun = False
-	version = "16.1"
-	versionSet = False
 	projectName = "top"
 	projectNameSet = False
+	recursive = False
 
 	try:
-		opts, args = getopt.getopt(sys.argv[1:], "hdp:v:", ["help", "dry-run", "project-name=", "version="])
+		opts, args = getopt.getopt(sys.argv[1:], "dp:rh", ["dry-run", "project-name=", "recursive", "help"])
 	except getopt.GetoptError as err:
 		printError(Errors.GETOPT_ERROR, printUsage, True, str(err))
 
 	for o, a in opts:
 		if o in ("-d", "--dry-run"):
 			dryRun = True
-		elif o in ("-v", "--version"):
-			version = a
-			versionSet = True
 		elif o in ("-p", "--project-name"):
 			projectName = a
 			projectNameSet = True
+		elif o in ("-r", "--recursive"):
+			recursive = True
 		else:
 			printUsage()
 			exit(0)
 
 	if 0 == len(args):
 		printError(Errors.MISSING_ARGUMENT, printUsage, True, "PATH")
-	if version not in versions:
-		printError(Errors.INVALID_VERSION, printUsage, True, version)
-	if not versionSet:
-		printWarning(Warnings.USING_DEFAULT_VALUE, "-v/--version={}".format(version))
-	if not projectNameSet:
-		printWarning(Warnings.USING_DEFAULT_VALUE, "-p/--project-name={}".format(projectName))
+	if recursive:
+		if projectNameSet:
+			printWarning(Warnings.IGNORING_ARGUMENT, "-p/--project-name={}".format(projectName))
+	else:
+		if not projectNameSet:
+			printWarning(Warnings.USING_DEFAULT_VALUE, "-p/--project-name={}".format(projectName))
 
 	if dryRun:
 		print("> Running in dry-run mode")
 
-	if not os.path.isfile(os.path.join(args[0], "{}.qpf".format(projectName))):
-		printError(Errors.NOT_A_PROJECT, None, True)
+	if recursive:
+		for dirPath, dirNames, fileNames in os.walk(args[0], False):
+			qpfFile = None
+			for f in fileNames:
+				if ".qpf" == os.path.splitext(f)[1]:
+					qpfFile = f
 
-	print("> Current project size: {}".format(getTotalFolderSize(args[0])))
+			if qpfFile is not None:
+				print("> Found project: {}".format(os.path.splitext(qpfFile)[0]))
+				print("> In: {}".format(dirPath))
+				print(">   Current project size: {}".format(getTotalFolderSize(dirPath)))
+				try:
+					cleanProject(dirPath, dryRun)
+				except Exception as err:
+					printError(Errors.EXTERNAL_ERROR, None, True, str(err))
+				print(">   Final project size: {}".format(getTotalFolderSize(dirPath)))
+	else:
+		if not os.path.isfile(os.path.join(args[0], "{}.qpf".format(projectName))):
+			printError(Errors.NOT_A_PROJECT, None, True)
 
-	if "16.0" == version:
-		# TODO
-		pass
-	elif "16.1" == version:
-		toRemoveFolders = [
-			"db",
-			"incremental_db",
-			"persona",
-			"system"
-		]
-		toRemoveFiles = [
-		]
-		toRemoveByExtension = [
-			".sof",
-			".rbf",
-			".aocx",
-			".bin"
-		]
-
+		print("> Found project: {}".format(projectName))
+		print(">   Current project size: {}".format(getTotalFolderSize(args[0])))
 		try:
-			for p in os.listdir(args[0]):
-				fullPath = os.path.join(args[0], p)
-				if p in toRemoveFolders:
-					print("> Removing {} folder...".format(p))
-					if not dryRun:
-						shutil.rmtree(fullPath)
-				elif p in toRemoveFiles:
-					print("> Removing {} file...".format(p))
-					if not dryRun:
-						os.remove(fullPath)
-				elif os.path.splitext(p)[1] in toRemoveByExtension:
-					print("> Removing {} file...".format(p))
-					if not dryRun:
-						os.remove(fullPath)
+			cleanProject(args[0], dryRun)
 		except Exception as err:
 			printError(Errors.EXTERNAL_ERROR, None, True, str(err))
-
-
-	print("> Final project size: {}".format(getTotalFolderSize(args[0])))
+		print(">   Final project size: {}".format(getTotalFolderSize(args[0])))
