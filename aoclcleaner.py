@@ -1,5 +1,29 @@
 #!/usr/bin/env python3
 
+# #############################################################################################
+# # Intel FPGA (Altera) OpenCL Project Cleaner
+# # Author: André Bannwart Perina                                                             #
+# #############################################################################################
+# # Copyright (c) 2018 André B. Perina                                                        #
+# #                                                                                           #
+# # Permission is hereby granted, free of charge, to any person obtaining a copy of this      #
+# # software and associated documentation files (the "Software"), to deal in the Software     #
+# # without restriction, including without limitation the rights to use, copy, modify,        #
+# # merge, publish, distribute, sublicense, and/or sell copies of the Software, and to        #
+# # permit persons to whom the Software is furnished to do so, subject to the following       #
+# # conditions:                                                                               #
+# #                                                                                           #
+# # The above copyright notice and this permission notice shall be included in all copies     #
+# # or substantial portions of the Software.                                                  #
+# #                                                                                           #
+# # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,       #
+# # INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR  #
+# # PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE #
+# # FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR      #
+# # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER    #
+# # DEALINGS IN THE SOFTWARE.                                                                 #
+# #############################################################################################
+
 
 from enum import Enum
 import getopt, os, shutil, sys
@@ -8,6 +32,13 @@ import getopt, os, shutil, sys
 cleanerName = os.path.basename(os.path.splitext(__file__)[0])
 
 
+# Fancy error print
+# Format:
+# Error: <error>: <addInfo>
+#   <addInfos[0]>
+#   <addInfos[1]>
+#   <addInfos[2]>
+#   ...
 def printError(error, usageFunc, mustExit=False, addInfo=None, addInfos=[]):
 	sys.stderr.write("Error: {}{}\n".format(error.value[0], ": {}".format(addInfo) if addInfo is not None else ""))
 	for i in addInfos:
@@ -21,6 +52,13 @@ def printError(error, usageFunc, mustExit=False, addInfo=None, addInfos=[]):
 		exit(1)
 
 
+# Fancy warning print
+# Format:
+# Warning: <warning>: <addInfo>
+#   <addInfos[0]>
+#   <addInfos[1]>
+#   <addInfos[2]>
+#   ...
 def printWarning(warning, addInfo=None, addInfos=[]):
 	sys.stderr.write("Warning: {}{}\n".format(warning.value, ": {}".format(addInfo) if addInfo is not None else ""))
 	for i in addInfos:
@@ -28,6 +66,7 @@ def printWarning(warning, addInfo=None, addInfos=[]):
 		sys.stderr.write("\n")
 
 
+# Class with all possible errors for this tool
 class Errors(Enum):
 	NO_ERRORS = ("No errors", False)
 	GENERAL_ERROR = ("An unhandled general error occurred. Additional info may follow", False)
@@ -38,21 +77,24 @@ class Errors(Enum):
 	NOT_A_PROJECT = ("Specified folder does not have a valid Quartus project hierarchy or project name is incorrect", False)
 
 
+# Class with all possible warnings for this tool
 class Warnings(Enum):
 	IGNORING_ARGUMENT = "Ignoring argument"
 	USING_DEFAULT_VALUE = "Using default value"
 
 
+# Print this tool's usage
 def printUsage(printToError=False):
 	usageStr = (
 		'AOCLCleaner: a cleaner for OpenCL Quartus II projects\n'
 		'\n'
 		'Usage: {0} ARGS... PATH\n'
 		'Where ARGS can be:\n'
-		'	-d, --dry-run		   : don\'t modify anything, just print what would be kept and deleted\n'
-		'	-p, --project-name=NAME: specify the project name (default is top)\n'
-		'	-r, --recursive        : recursively search PATH for Quartus projects and clean them all\n'
-		'	-h, --help			   : show this message\n'
+		'   -a, --aggressive       : delete the project; leave only aocx/aoco files\n'
+		'   -d, --dry-run          : don\'t modify anything, just print what would be kept and deleted\n'
+		'   -p, --project-name=NAME: specify the project name (default is top)\n'
+		'   -r, --recursive        : recursively search PATH for Quartus projects and clean them all\n'
+		'   -h, --help             : show this message\n'
 		'Where PATH is the path to the Quartus project folder\n'.format(cleanerName)
 	)
 
@@ -62,6 +104,7 @@ def printUsage(printToError=False):
 		print(usageStr)
 
 
+# Return a string with the path's size using human-friendly units
 def getTotalFolderSize(path="."):
 	totalSize = 0
 	for dirPath, dirNames, fileNames in os.walk(path):
@@ -81,10 +124,13 @@ def getTotalFolderSize(path="."):
 	return "{:.2f} {} ({:.2f} {})".format(totalSize, unitList[unit], totalBinSize, unitBinList[unit])
 
 
-def cleanProject(path=".", dryRun=False):
+# Clean a project
+def cleanProject(path=None, aggressive=False, dryRun=False):
+	# Folders that are maintained (non-agressive)
 	maintainFolders = [
 		"reports"
 	]
+	# Files that are maintained according to extension (non-aggressive)
 	maintainExtensions = [
 		".log",
 		".txt",
@@ -99,35 +145,48 @@ def cleanProject(path=".", dryRun=False):
 		".qsys"
 	]
 
-	for p in os.listdir(path):
-		fullPath = os.path.join(path, p)
-		if os.path.isdir(fullPath):
-			if p not in maintainFolders:
-				print(">   Removing {} folder...".format(p))
-				if not dryRun:
-					shutil.rmtree(fullPath)
-		else:
-			if os.path.splitext(p)[1] not in maintainExtensions:
-				print(">   Removing {} file...".format(p))
-				if not dryRun:
-					os.remove(fullPath)
+	# If aggressive mode is on, the whole project folder is deleted
+	if aggressive:
+		print(">  Removing {} project...".format(path))
+		if not dryRun:
+			shutil.rmtree(path)
+	# If not aggressive, iterate through project and delete all files that should not be maintained
+	else:
+		for p in os.listdir(path):
+			fullPath = os.path.join(path, p)
+			if os.path.isdir(fullPath):
+				if p not in maintainFolders:
+					print(">   Removing {} folder...".format(p))
+					if not dryRun:
+						shutil.rmtree(fullPath)
+			else:
+				if os.path.splitext(p)[1] not in maintainExtensions:
+					print(">   Removing {} file...".format(p))
+					if not dryRun:
+						os.remove(fullPath)
 
 
+# Main class (duh)
 if "__main__" == __name__:
 	opts = []
 	args = []
+	aggressive = False
 	dryRun = False
 	projectName = "top"
 	projectNameSet = False
 	recursive = False
 
+	# Get command line options
 	try:
-		opts, args = getopt.getopt(sys.argv[1:], "dp:rh", ["dry-run", "project-name=", "recursive", "help"])
+		opts, args = getopt.getopt(sys.argv[1:], "adp:rh", ["aggressive", "dry-run", "project-name=", "recursive", "help"])
 	except getopt.GetoptError as err:
 		printError(Errors.GETOPT_ERROR, printUsage, True, str(err))
 
+	# Parse command line options
 	for o, a in opts:
-		if o in ("-d", "--dry-run"):
+		if o in ("-a", "--aggressive"):
+			aggressive = True
+		elif o in ("-d", "--dry-run"):
 			dryRun = True
 		elif o in ("-p", "--project-name"):
 			projectName = a
@@ -138,6 +197,7 @@ if "__main__" == __name__:
 			printUsage()
 			exit(0)
 
+	# Print friendly warnings
 	if 0 == len(args):
 		printError(Errors.MISSING_ARGUMENT, printUsage, True, "PATH")
 	if recursive:
@@ -150,6 +210,12 @@ if "__main__" == __name__:
 	if dryRun:
 		print("> Running in dry-run mode")
 
+	if aggressive:
+		print("> WARNING: AGGRESSIVE MODE ON: ONLY AOCX/AOCO FILES ARE MAINTAINED")
+		sys.stdout.write("> PRESS ANY KEY TO CONTINUE OR CTRL+C TO CANCEL THIS NONSENSE...")
+		input()
+
+	# If recursive, current provided path is recursively iterated in search of quartus projects
 	if recursive:
 		for dirPath, dirNames, fileNames in os.walk(args[0], False):
 			qpfFile = None
@@ -162,10 +228,11 @@ if "__main__" == __name__:
 				print("> In: {}".format(dirPath))
 				print(">   Current project size: {}".format(getTotalFolderSize(dirPath)))
 				try:
-					cleanProject(dirPath, dryRun)
+					cleanProject(dirPath, aggressive, dryRun)
 				except Exception as err:
 					printError(Errors.EXTERNAL_ERROR, None, True, str(err))
 				print(">   Final project size: {}".format(getTotalFolderSize(dirPath)))
+	# Non-recursive mode
 	else:
 		if not os.path.isfile(os.path.join(args[0], "{}.qpf".format(projectName))):
 			printError(Errors.NOT_A_PROJECT, None, True)
@@ -173,7 +240,7 @@ if "__main__" == __name__:
 		print("> Found project: {}".format(projectName))
 		print(">   Current project size: {}".format(getTotalFolderSize(args[0])))
 		try:
-			cleanProject(args[0], dryRun)
+			cleanProject(args[0], aggressive, dryRun)
 		except Exception as err:
 			printError(Errors.EXTERNAL_ERROR, None, True, str(err))
 		print(">   Final project size: {}".format(getTotalFolderSize(args[0])))
